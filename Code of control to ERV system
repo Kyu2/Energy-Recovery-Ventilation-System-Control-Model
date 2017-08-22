@@ -1,0 +1,199 @@
+# ERV control System _ Python
+import main
+import time
+if __name__ == "__main__":
+    while True :
+        print ("Start Function")
+        #CE.main_run(1,1) # set fanIN, fanOUT
+        main.ERVCotrol()
+        time.sleep(600)     
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+#from sklearn.preprocessing import normalize
+
+import random
+import csv
+import numpy as np
+import tensorflow as tf
+
+matrix=[]
+
+fiot=open('C:/Users/park/Downloads/data.csv','r')
+csvReader=csv.reader(fiot)
+
+for row in csvReader:
+    matrix.append(row)
+
+matrix=np.array(matrix).astype(np.float)
+mean_matrix=np.mean(matrix,axis=0)
+std_matrix=np.std(matrix,axis=0)
+
+norm_matrix=(matrix-mean_matrix)/std_matrix
+#matrix=normalize(matrix, axis=0, norm='max')
+matrix=norm_matrix
+
+print (matrix)
+matrix_test=[]
+
+fiot2=open('C:/Users/park/Downloads/data2.csv','r')
+csvReader2=csv.reader(fiot2)
+
+for row2 in csvReader2:
+    matrix_test.append(row2)
+    
+matrix_test=np.array(matrix_test).astype(np.float)
+#matrix_test=normalize(matrix_test, axis=0, norm='max')
+mean_matrix_test=np.mean(matrix_test,axis=0)
+std_matrix_test=np.std(matrix_test,axis=0)
+
+norm_matrix_test=(matrix_test-mean_matrix_test)/std_matrix_test
+matrix_test=norm_matrix_test
+
+def denormalization(x,mean_matrix,std_matrix):
+    denorm_matrix=x*std_matrix[-7:]+mean_matrix[-7:]
+    return denorm_matrix
+
+# Parameters
+learning_rate = 0.001
+training_epochs = 100
+batch_size = random.sample(range(4400),100)
+batch_test = random.sample(range(487),100)
+display_step = 1
+
+# Network Parameters
+n_hidden_1 = 256 # 1st layer number of features
+n_hidden_2 = 256 # 2nd layer number of features
+n_input = 14 # Data input classes (t-1 and t seconds' temp, hum, co2, vocs, dust, pm10, pm2.5)
+n_classes = 7 # Data Output classes (t+1 seconds' temp, hum, co2, vocs, dust, pm10, pm2.5)
+
+# tf Graph input
+x = tf.placeholder("float", [None, n_input])
+y = tf.placeholder("float", [None, n_classes])
+
+
+# Create model
+def multilayer_perceptron(x, weights, biases):
+    # Hidden layer with sigmoid activation
+    layer_1 = tf.add(tf.matmul(x, weights['h1']), biases['b1'])
+    layer_1 = tf.nn.sigmoid(layer_1)
+    # Hidden layer with sigmoid activation
+    layer_2 = tf.add(tf.matmul(layer_1, weights['h2']), biases['b2'])
+    layer_2 = tf.nn.sigmoid(layer_2)
+    # Output layer with linear activation
+    out_layer = tf.matmul(layer_2, weights['out']) + biases['out']
+    return out_layer
+
+# Store layers weight & bias
+weights = {
+    'h1': tf.Variable(tf.random_normal([n_input, n_hidden_1])),
+    'h2': tf.Variable(tf.random_normal([n_hidden_1, n_hidden_2])),
+    'out': tf.Variable(tf.random_normal([n_hidden_2, n_classes]))
+}
+biases = {
+    'b1': tf.Variable(tf.random_normal([n_hidden_1])),
+    'b2': tf.Variable(tf.random_normal([n_hidden_2])),
+    'out': tf.Variable(tf.random_normal([n_classes]))
+}
+
+# Construct model
+pred = multilayer_perceptron(x, weights, biases)
+
+
+# Define loss and optimizer
+cost = tf.reduce_mean((pred-y)**2)
+#TODO weight decay
+global_step=tf.Variable(0, trainable=False)
+starter_learning_rate=0.1
+
+# Construct model
+pred = multilayer_perceptron(x, weights, biases)
+
+
+# Define loss and optimizer
+cost = tf.reduce_mean((pred-y)**2)
+#TODO weight decay
+global_step=tf.Variable(0, trainable=False)
+starter_learning_rate=0.1
+learning_rate=tf.train.exponential_decay(starter_learning_rate, global_step, 100, 0.9, staircase=True)
+
+optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost,global_step=global_step)
+
+# Initializing the variables
+init = tf.global_variables_initializer()
+
+# Launch the graph
+with tf.Session() as sess:
+    sess.run(init)
+
+    # Training cycle
+    for epoch in range(training_epochs):
+        avg_cost = 0.
+        total_batch =21*4400/100
+        
+        for i in range(int(total_batch)):
+            batch_x=matrix[batch_size,0:14]
+            batch_y=matrix[batch_size,14:21]
+            _,c,pred1=sess.run([optimizer,cost,pred],feed_dict={x:batch_x, y:batch_y})
+            
+            avg_cost += c/total_batch
+            
+        test_cost=0.
+        test_batch=21*487/100
+      
+        # Loop over all batches
+        for i in range(int(test_batch)):
+            batch_x=matrix_test[batch_test,0:14]
+            batch_y=matrix_test[batch_test,14:21]
+            # Run optimization op (backprop) and cost op (to get loss value)
+            c, pred_test = sess.run([ cost, pred], feed_dict={x: batch_x,
+                                                          y: batch_y})
+            # Compute average loss
+            test_cost += c / test_batch
+
+        # Display logs per epoch step
+        if epoch % display_step == 0:
+            print("Epoch:", '%04d' % (epoch+1), "training cost=", \
+                "{:.9f}".format(avg_cost), "test cost=","{:.9f}".format(test_cost))
+    print("Optimization Finished!")
+
+    # Test model
+    #correct_prediction = tf.equal(tf.argmax(pred1, 1), tf.argmax(batch_y, 1))
+    # Calculate accuracy
+    #accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
+    
+    import ControlERV as CE
+    import GetAWAIR as GA
+    import GetOutdoor as GO
+    import callDB as CD
+    itemp, ihum, co2, voc, dust = GA.main_get()
+    pm10, pm25, otemp, ohum = GO.main_get_outdoor()
+    rows = CD.readDB()
+    
+    # Start 
+    mat = CD.make2DMat(rows)
+    mat_new=np.array(mat)
+    
+    ########### Defalut Value ###########
+    mean_mat=mean_matrix[7:21]
+    std_mat=mean_matrix[7:21]
+    #norm_mat=(mat_new-mean_mat)/std_mat
+    chki=1
+    ###########  Prediction   ###########
+    for row_mat in mat_new:
+        norm_mat=(row_mat-mean_mat)/std_mat
+        pred_real=sess.run([pred],feed_dict={x:norm_mat.reshape(-1,14)})
+        print (pred_real)
+        print (denormalization(pred_real, mean_matrix, std_matrix))
+        ft15=denormalization(pred_real,mean_matrix,std_matrix)
+        
+        
+        CD.store2DB(rows[chki][0],str('%.2f' %ft15[0][0][0]),str('%.2f' %ft15[0][0][1]),str('%.2f' %ft15[0][0][2]),str('%.2f' %ft15[0][0][3]),
+                    str('%.2f' %ft15[0][0][4]),str('%.2f' %ft15[0][0][5]),str('%.2f' %ft15[0][0][6]))
+        chki += 1 
+    
+    
+    ### End
+import controlERV as CE
+
+CE.main_run(1,1)
